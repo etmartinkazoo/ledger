@@ -1,0 +1,16 @@
+[package]
+name = "ledger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ledger-core = { path = "../core" }
+gtk4 = { version = "0.11", features = ["v4_18"] }
+libadwaita = { version = "0.9", features = ["v1_9"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
