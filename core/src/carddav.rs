@@ -21,6 +21,10 @@ pub enum Error {
     Unauthorized,
     #[error("sign in with Google again")]
     SignIn,
+    /// Google refused a signed-in request, in its own words: an API not enabled for the OAuth
+    /// client's project, say.
+    #[error("Google: {0}")]
+    Google(String),
     #[error("not found")]
     NotFound,
     #[error("the contact changed on the server; refresh and try again")]
@@ -152,6 +156,11 @@ impl Client {
                 continue;
             }
             return match response.status() {
+                status @ (StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) if matches!(self.credentials, Credentials::Google(_)) => {
+                    // No password is involved: say what Google says.
+                    let body = response.text().await.unwrap_or_default();
+                    Err(Error::Google(google_refusal(&body).unwrap_or_else(|| format!("access refused ({status})"))))
+                }
                 StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Error::Unauthorized),
                 StatusCode::NOT_FOUND => Err(Error::NotFound),
                 StatusCode::PRECONDITION_FAILED => Err(Error::Changed),
@@ -390,6 +399,13 @@ fn chain(error: &dyn std::error::Error) -> String {
     text
 }
 
+/// The `error.message` of a Google API error answer.
+fn google_refusal(body: &str) -> Option<String> {
+    let answer: serde_json::Value = serde_json::from_str(body).ok()?;
+    let message = answer["error"]["message"].as_str()?.trim();
+    (!message.is_empty()).then(|| message.to_owned())
+}
+
 fn xml_escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
@@ -566,5 +582,15 @@ END:VCARD&#13;
         assert_eq!(found.len(), 1);
         assert!(found[0].vcf.starts_with("BEGIN:VCARD"));
         assert_eq!(xml_escape("/a&b/"), "/a&amp;b/");
+    }
+
+    #[test]
+    fn says_why_google_refused() {
+        let body = r#"{"error": {"code": 403, "message": "Google Contacts CardDAV API has not been used in project 1 before or it is disabled.", "status": "PERMISSION_DENIED"}}"#;
+        assert_eq!(
+            google_refusal(body).as_deref(),
+            Some("Google Contacts CardDAV API has not been used in project 1 before or it is disabled.")
+        );
+        assert_eq!(google_refusal("<html>no</html>"), None);
     }
 }
